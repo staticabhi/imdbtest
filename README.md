@@ -1,66 +1,70 @@
-# Lesson 3: Python Pandas Tutorial - Advanced Analysis with Clinical Data
+# Lesson 3: Creating a Listing for Concomitant Medications and Medical History (Pandas)
 
 ## Objective:
-Perform advanced analysis on clinical datasets using Python Pandas. Specifically, create a listing that:
-1. Filters subjects who experienced an Adverse Event (AE) and later died.
-2. Computes the duration between AE End Date and Death Date.
-3. Adds the following columns:
-   - `Subject ID`
-   - `AETERM`
-   - `AEDECODE`
-   - `AEENDDATE`
-   - `DDDAT` (Death Date)
-   - `Duration (days)`
-   - `RFICDT` (Reference Start Date)
+Create a listing to analyze Concomitant Medications (CM) and Medical History (MH) using Pandas. The listing will include derived columns and key variables from the following domains:
+- **CM**: Concomitant Medications domain.
+- **MH**: Medical History domain.
 
-### Data Sources:
-- **AE**: Adverse Event domain.
-- **DD**: Death Disposition domain.
-- **DM**: Demographics domain.
+### Key Variables:
+1. **Subject ID (USUBJID)**
+2. **CMTRT**: Name of Concomitant Medication
+3. **CMINDC**: Indication for Concomitant Medication
+4. **CMSTDTC**: Start Date of Concomitant Medication
+5. **MHDECOD**: Medical History Term (Standardized)
+6. **MHSTDTC**: Start Date of Medical History Event
+7. **Overlap**: A derived column indicating if the Concomitant Medication overlaps with a Medical History event (Yes/No).
+
+### Steps:
+1. Import and prepare the datasets.
+2. Merge CM and MH domains on `USUBJID`.
+3. Derive the `Overlap` column based on date comparisons.
+4. Create the final listing.
 
 ```python
 import pandas as pd
 
-# Sample DataFrames for AE, DD, and DM
-ae_data = {
+# Sample DataFrames for CM and MH
+cm_data = {
     'USUBJID': ["SUBJ001", "SUBJ002", "SUBJ003"],
-    'AETERM': ["Headache", "Nausea", "Dizziness"],
-    'AEDECODE': ["HEADACHE", "NAUSEA", "DIZZINESS"],
-    'AEENDDATE': ["2024-01-10", "2024-02-10", "2024-03-15"]
+    'CMTRT': ["Paracetamol", "Ibuprofen", "Aspirin"],
+    'CMINDC': ["Fever", "Pain", "Blood Thinner"],
+    'CMSTDTC': ["2024-01-01", "2024-02-10", "2024-03-15"]
 }
-dd_data = {
-    'USUBJID': ["SUBJ001", "SUBJ002", "SUBJ004"],
-    'DDDAT': ["2024-01-15", "2024-02-12", "2024-04-01"]
-}
-dm_data = {
+mh_data = {
     'USUBJID': ["SUBJ001", "SUBJ002", "SUBJ003", "SUBJ004"],
-    'RFICDT': ["2023-12-25", "2024-01-15", "2024-02-20", "2024-03-01"]
+    'MHDECOD': ["Hypertension", "Arthritis", "Heart Disease", "Diabetes"],
+    'MHSTDTC': ["2023-12-15", "2024-02-01", "2024-03-10", "2024-01-05"]
 }
 
 # Create DataFrames
-ae_df = pd.DataFrame(ae_data)
-dd_df = pd.DataFrame(dd_data)
-dm_df = pd.DataFrame(dm_data)
+cm_df = pd.DataFrame(cm_data)
+mh_df = pd.DataFrame(mh_data)
 
 # Convert date columns to datetime
-ae_df['AEENDDATE'] = pd.to_datetime(ae_df['AEENDDATE'])
-dd_df['DDDAT'] = pd.to_datetime(dd_df['DDDAT'])
-dm_df['RFICDT'] = pd.to_datetime(dm_df['RFICDT'])
+to_datetime_cols = ['CMSTDTC', 'MHSTDTC']
+for df, cols in [(cm_df, ['CMSTDTC']), (mh_df, ['MHSTDTC'])]:
+    for col in cols:
+        df[col] = pd.to_datetime(df[col])
 
-# Merge DataFrames
-merged_df = pd.merge(ae_df, dd_df, on='USUBJID', how='inner')
-merged_df = pd.merge(merged_df, dm_df, on='USUBJID', how='left')
+# Merge CM and MH on USUBJID
+merged_df = pd.merge(cm_df, mh_df, on='USUBJID', how='inner')
 
-# Calculate Duration between AE End Date and Death Date
-merged_df['Duration (days)'] = (merged_df['DDDAT'] - merged_df['AEENDDATE']).dt.days
+# Derive Overlap column
+merged_df['Overlap'] = merged_df.apply(
+    lambda row: "Yes" if row['CMSTDTC'] >= row['MHSTDTC'] else "No", axis=1
+)
 
-# Select and rename columns
+# Select and rename columns for final listing
 final_listing = merged_df[[
-    'USUBJID', 'AETERM', 'AEDECODE', 'AEENDDATE', 'DDDAT', 'Duration (days)', 'RFICDT'
-]]
-final_listing.rename(columns={
-    'USUBJID': 'Subject ID'
-}, inplace=True)
+    'USUBJID', 'CMTRT', 'CMINDC', 'CMSTDTC', 'MHDECOD', 'MHSTDTC', 'Overlap'
+]].rename(columns={
+    'USUBJID': 'Subject ID',
+    'CMTRT': 'Concomitant Medication',
+    'CMINDC': 'Indication',
+    'CMSTDTC': 'CM Start Date',
+    'MHDECOD': 'Medical History Term',
+    'MHSTDTC': 'MH Start Date'
+})
 
 # Display the final listing
 print(final_listing)
@@ -68,21 +72,21 @@ print(final_listing)
 
 ### Explanation:
 1. **Data Preparation**:
-   - Convert all date columns to `datetime` format for accurate calculations.
-2. **Data Merging**:
-   - Inner join AE and DD domains to filter subjects who experienced an AE and later died.
-   - Left join with DM to include reference start dates.
-3. **Duration Calculation**:
-   - Calculate the difference between `DDDAT` (Death Date) and `AEENDDATE` (AE End Date) in days.
+   - Convert date columns to `datetime` format for accurate comparisons.
+2. **Merging DataFrames**:
+   - Perform an inner join on `USUBJID` to align CM and MH data for each subject.
+3. **Deriving Overlap**:
+   - Compare `CMSTDTC` (CM Start Date) and `MHSTDTC` (MH Start Date) to determine if the Concomitant Medication overlaps with a Medical History event.
 4. **Final Listing**:
-   - Select and rename columns for better readability.
+   - Select and rename columns to create a clear, readable listing.
 
 ### Output:
 The resulting DataFrame (`final_listing`) will look like this:
 
-| Subject ID | AETERM    | AEDECODE   | AEENDDATE   | DDDAT      | Duration (days) | RFICDT     |
-|------------|-----------|------------|-------------|------------|-----------------|------------|
-| SUBJ001    | Headache  | HEADACHE   | 2024-01-10  | 2024-01-15 | 5               | 2023-12-25 |
-| SUBJ002    | Nausea    | NAUSEA     | 2024-02-10  | 2024-02-12 | 2               | 2024-01-15 |
+| Subject ID | Concomitant Medication | Indication   | CM Start Date | Medical History Term | MH Start Date | Overlap |
+|------------|-------------------------|--------------|---------------|-----------------------|---------------|---------|
+| SUBJ001    | Paracetamol            | Fever        | 2024-01-01    | Hypertension         | 2023-12-15    | Yes     |
+| SUBJ002    | Ibuprofen              | Pain         | 2024-02-10    | Arthritis            | 2024-02-01    | Yes     |
+| SUBJ003    | Aspirin                | Blood Thinner| 2024-03-15    | Heart Disease        | 2024-03-10    | Yes     |
 
-This listing provides critical insights into subjects who died after experiencing an AE and the duration between these events.
+This listing provides insights into the relationship between concomitant medications and medical history events for each subject.
