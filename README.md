@@ -1,142 +1,98 @@
-# Lesson 2: Adding ECG Timing Columns Relative to AE Start Date
+# Lesson 1: Python Pandas Tutorial - Checking Deaths After AE Reported Event Ends
 
-In this tutorial, we will create a listing that adds two new columns:
+## Objective:
+Create a listing that checks if there are any deaths occurring after the AE (Adverse Event) reported event ends. Add a column `Message` with "Yes" or "No" based on the presence of death after AE end. Include the following columns in the final listing:
 
-1. **ECG Before AESTARTDATE**: The latest ECG record before the AE start date.
-2. **ECG After AESTARTDATE**: The earliest ECG record after the AE start date.
+- AE End Date
+- AE Logline
+- Maximum Disposition Date
+- AETERM
+- AEDECODE
+- AESTARTDATE
+- AEENDDATE
+- RFICDT
 
-Additionally, the output will include the following columns:
-
-- **AE Logline**
-- **AETERM**
-- **AEDECODE**
-- **AESTARTDATE**
-- **AEENDDATE**
-
-We will achieve this by joining data from the following domains:
-
-1. **AE (Adverse Events)**
-2. **EG (Electrocardiograms)**
-
----
-
-## Steps
-
-### Step 1: Import Required Libraries
-Import the necessary libraries for data processing.
+### Data Sources:
+- **AE**: Adverse Event domain.
+- **DD**: Death Disposition domain.
+- **DM**: Demographics domain.
 
 ```python
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, max, min, when
-```
+import pandas as pd
 
-### Step 2: Initialize Spark Session
-Create a Spark session for handling the data.
+# Sample DataFrames for AE, DD, and DM
+ae_data = {
+    'USUBJID': ["SUBJ001", "SUBJ002", "SUBJ003"],
+    'AETERM': ["Headache", "Nausea", "Dizziness"],
+    'AEDECODE': ["HEADACHE", "NAUSEA", "DIZZINESS"],
+    'AESTARTDATE': ["2024-01-01", "2024-02-01", "2024-03-01"],
+    'AEENDDATE': ["2024-01-10", "2024-02-10", "2024-03-15"],
+    'AE_LOG': ["Log1", "Log2", "Log3"]
+}
+dd_data = {
+    'USUBJID': ["SUBJ001", "SUBJ002", "SUBJ004"],
+    'DDDAT': ["2024-01-15", "2024-02-12", "2024-04-01"]
+}
+dm_data = {
+    'USUBJID': ["SUBJ001", "SUBJ002", "SUBJ003", "SUBJ004"],
+    'RFICDT': ["2023-12-25", "2024-01-15", "2024-02-20", "2024-03-01"]
+}
 
-```python
-spark = SparkSession.builder \
-    .appName("AE and ECG Timing") \
-    .getOrCreate()
-```
+# Create DataFrames
+ae_df = pd.DataFrame(ae_data)
+dd_df = pd.DataFrame(dd_data)
+dm_df = pd.DataFrame(dm_data)
 
-### Step 3: Load the Datasets
-Load the AE and EG datasets into separate Spark DataFrames. Ensure the datasets are available in the specified paths.
+# Convert dates to datetime format
+ae_df['AESTARTDATE'] = pd.to_datetime(ae_df['AESTARTDATE'])
+ae_df['AEENDDATE'] = pd.to_datetime(ae_df['AEENDDATE'])
+dd_df['DDDAT'] = pd.to_datetime(dd_df['DDDAT'])
+dm_df['RFICDT'] = pd.to_datetime(dm_df['RFICDT'])
 
-```python
-# Load datasets
-ae_df = spark.read.csv("AE.csv", header=True, inferSchema=True)
-eg_df = spark.read.csv("EG.csv", header=True, inferSchema=True)
-```
+# Merge AE, DD, and DM domains
+ae_dd_df = pd.merge(ae_df, dd_df, on='USUBJID', how='left')
+final_df = pd.merge(ae_dd_df, dm_df, on='USUBJID', how='left')
 
-### Step 4: Preprocess Data
-Ensure the necessary columns are properly formatted and parse date columns for easier processing.
+# Calculate Maximum Disposition Date
+final_df['MaxDispositionDate'] = final_df['DDDAT']
 
-```python
-# Convert date columns to date format
-ae_df = ae_df.withColumn("AESTARTDATE", col("AESTARTDATE").cast("date"))
-ae_df = ae_df.withColumn("AEENDDATE", col("AEENDDATE").cast("date"))
-eg_df = eg_df.withColumn("EGDATE", col("EGDATE").cast("date"))
-```
-
-### Step 5: Join AE and EG Data
-Join the AE and EG datasets on `subject_id` to combine ECG data with AE data.
-
-```python
-# Join AE and EG datasets
-joined_df = ae_df.join(eg_df, on="subject_id", how="left")
-```
-
-### Step 6: Derive ECG Timing Columns
-
-#### Step 6.1: ECG Before AESTARTDATE
-Identify the latest ECG record before the AE start date for each AE logline using a window function.
-
-```python
-from pyspark.sql.window import Window
-
-# Define a window partitioned by subject_id and AE Logline
-window_spec_before = Window.partitionBy("subject_id", "AE Logline").orderBy(col("EGDATE").desc())
-
-# Filter and select the latest ECG before AESTARTDATE
-joined_df = joined_df.withColumn(
-    "ECG_Before_AESTARTDATE",
-    max(when(col("EGDATE") < col("AESTARTDATE"), col("EGDATE"))).over(window_spec_before)
+# Check if death occurred after AE end date
+final_df['Message'] = final_df.apply(
+    lambda row: "Yes" if pd.notna(row['DDDAT']) and row['DDDAT'] > row['AEENDDATE'] else "No",
+    axis=1
 )
+
+# Select required columns
+final_listing = final_df[[
+    'USUBJID', 'AETERM', 'AEDECODE', 'AESTARTDATE', 'AEENDDATE', 'AE_LOG',
+    'MaxDispositionDate', 'RFICDT', 'Message'
+]]
+
+# Rename columns for clarity
+final_listing.rename(columns={
+    'AE_LOG': 'AE Logline',
+    'MaxDispositionDate': 'Maximum Disposition Date'
+}, inplace=True)
+
+print(final_listing)
 ```
 
-#### Step 6.2: ECG After AESTARTDATE
-Identify the earliest ECG record after the AE start date for each AE logline using a similar window function.
+### Explanation:
+1. **Data Preparation**:
+   - Convert all date columns to `datetime` for accurate comparisons.
+2. **Merging DataFrames**:
+   - Use `pd.merge` to join the AE, DD, and DM domains on `USUBJID`.
+3. **Calculating `Message`**:
+   - Use `apply` with a lambda function to check if `DDDAT` (Death Date) is after `AEENDDATE`.
+   - Assign "Yes" if death occurs after AE ends; otherwise, "No".
+4. **Final Listing**:
+   - Select required columns and rename them for better readability.
 
-```python
-# Define a window partitioned by subject_id and AE Logline
-window_spec_after = Window.partitionBy("subject_id", "AE Logline").orderBy(col("EGDATE"))
+### Output:
+The resulting DataFrame (`final_listing`) will look like this:
 
-# Filter and select the earliest ECG after AESTARTDATE
-joined_df = joined_df.withColumn(
-    "ECG_After_AESTARTDATE",
-    min(when(col("EGDATE") >= col("AESTARTDATE"), col("EGDATE"))).over(window_spec_after)
-)
-```
-
-### Step 7: Select Required Columns
-Filter the DataFrame to include only the required columns in the final listing.
-
-```python
-final_listing = joined_df.select(
-    "subject_id",
-    "AE Logline",
-    "AETERM",
-    "AEDECODE",
-    "AESTARTDATE",
-    "AEENDDATE",
-    "ECG_Before_AESTARTDATE",
-    "ECG_After_AESTARTDATE"
-)
-```
-
-### Step 8: Save the Listing
-Export the final listing to a CSV file for review.
-
-```python
-# Save to CSV
-final_listing.write.csv("AE_ECG_Timing_Listing.csv", header=True, mode="overwrite")
-```
-
----
-
-## Sample Output
-Below is an example of the output generated by the above steps:
-
-| subject_id | AE Logline | AETERM           | AEDECODE | AESTARTDATE | AEENDDATE  | ECG_Before_AESTARTDATE | ECG_After_AESTARTDATE |
-|------------|------------|------------------|----------|-------------|------------|------------------------|-----------------------|
-| 101        | 1          | Headache         | HEAD     | 2024-01-10  | 2024-01-15 | 2024-01-05             | 2024-01-12            |
-| 102        | 2          | Nausea           | NAUS     | 2024-01-15  | 2024-01-20 | 2024-01-12             | 2024-01-17            |
-
----
-
-## Key Takeaways
-- **Data Integration**: Combined AE and EG domains using `join`.
-- **ECG Timing Calculation**: Derived the latest and earliest ECG records relative to the AE start date.
-- **Final Output**: Generated a listing with essential columns for clinical review.
-
-This approach can be adapted for other timing-related analyses in clinical datasets.
+| USUBJID  | AETERM     | AEDECODE   | AESTARTDATE | AEENDDATE   | AE Logline | Maximum Disposition Date | RFICDT     | Message |
+|----------|------------|------------|-------------|-------------|------------|---------------------------|------------|---------|
+| SUBJ001  | Headache   | HEADACHE   | 2024-01-01  | 2024-01-10  | Log1       | 2024-01-15                | 2023-12-25 | Yes     |
+| SUBJ002  | Nausea     | NAUSEA     | 2024-02-01  | 2024-02-10  | Log2       | 2024-02-12                | 2024-01-15 | Yes     |
+| SUBJ003  | Dizziness  | DIZZINESS  | 2024-03-01  | 2024-03-15  | Log3       | NaT                       | 2024-02-20 | No      |
