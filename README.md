@@ -1,16 +1,17 @@
-# Lesson 2: PySpark Tutorial - Checking Deaths After AE Reported Event Ends
+# Lesson 3: Python Pandas Tutorial - Advanced Analysis with Clinical Data
 
 ## Objective:
-Create a listing that checks if there are any deaths occurring after the AE (Adverse Event) reported event ends using PySpark. Add a column `Message` with "Yes" or "No" based on the presence of death after AE end. Include the following columns in the final listing:
-
-- AE End Date
-- AE Logline
-- Maximum Disposition Date
-- AETERM
-- AEDECODE
-- AESTARTDATE
-- AEENDDATE
-- RFICDT
+Perform advanced analysis on clinical datasets using Python Pandas. Specifically, create a listing that:
+1. Filters subjects who experienced an Adverse Event (AE) and later died.
+2. Computes the duration between AE End Date and Death Date.
+3. Adds the following columns:
+   - `Subject ID`
+   - `AETERM`
+   - `AEDECODE`
+   - `AEENDDATE`
+   - `DDDAT` (Death Date)
+   - `Duration (days)`
+   - `RFICDT` (Reference Start Date)
 
 ### Data Sources:
 - **AE**: Adverse Event domain.
@@ -18,86 +19,70 @@ Create a listing that checks if there are any deaths occurring after the AE (Adv
 - **DM**: Demographics domain.
 
 ```python
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, when, to_date, greatest
-
-# Initialize Spark session
-spark = SparkSession.builder.appName("Lesson 2 - AE Deaths Check").getOrCreate()
+import pandas as pd
 
 # Sample DataFrames for AE, DD, and DM
-ae_data = [
-    ("SUBJ001", "Headache", "HEADACHE", "2024-01-01", "2024-01-10", "Log1"),
-    ("SUBJ002", "Nausea", "NAUSEA", "2024-02-01", "2024-02-10", "Log2"),
-    ("SUBJ003", "Dizziness", "DIZZINESS", "2024-03-01", "2024-03-15", "Log3")
-]
-dd_data = [
-    ("SUBJ001", "2024-01-15"),
-    ("SUBJ002", "2024-02-12"),
-    ("SUBJ004", "2024-04-01")
-]
-dm_data = [
-    ("SUBJ001", "2023-12-25"),
-    ("SUBJ002", "2024-01-15"),
-    ("SUBJ003", "2024-02-20"),
-    ("SUBJ004", "2024-03-01")
-]
+ae_data = {
+    'USUBJID': ["SUBJ001", "SUBJ002", "SUBJ003"],
+    'AETERM': ["Headache", "Nausea", "Dizziness"],
+    'AEDECODE': ["HEADACHE", "NAUSEA", "DIZZINESS"],
+    'AEENDDATE': ["2024-01-10", "2024-02-10", "2024-03-15"]
+}
+dd_data = {
+    'USUBJID': ["SUBJ001", "SUBJ002", "SUBJ004"],
+    'DDDAT': ["2024-01-15", "2024-02-12", "2024-04-01"]
+}
+dm_data = {
+    'USUBJID': ["SUBJ001", "SUBJ002", "SUBJ003", "SUBJ004"],
+    'RFICDT': ["2023-12-25", "2024-01-15", "2024-02-20", "2024-03-01"]
+}
 
-# Define schema and create DataFrames
-ae_df = spark.createDataFrame(ae_data, ["USUBJID", "AETERM", "AEDECODE", "AESTARTDATE", "AEENDDATE", "AE_LOG"])
-dd_df = spark.createDataFrame(dd_data, ["USUBJID", "DDDAT"])
-dm_df = spark.createDataFrame(dm_data, ["USUBJID", "RFICDT"])
+# Create DataFrames
+ae_df = pd.DataFrame(ae_data)
+dd_df = pd.DataFrame(dd_data)
+dm_df = pd.DataFrame(dm_data)
 
-# Convert date columns to date type
-ae_df = ae_df.withColumn("AESTARTDATE", to_date(col("AESTARTDATE")))
-ae_df = ae_df.withColumn("AEENDDATE", to_date(col("AEENDDATE")))
-dd_df = dd_df.withColumn("DDDAT", to_date(col("DDDAT")))
-dm_df = dm_df.withColumn("RFICDT", to_date(col("RFICDT")))
+# Convert date columns to datetime
+ae_df['AEENDDATE'] = pd.to_datetime(ae_df['AEENDDATE'])
+dd_df['DDDAT'] = pd.to_datetime(dd_df['DDDAT'])
+dm_df['RFICDT'] = pd.to_datetime(dm_df['RFICDT'])
 
-# Join AE, DD, and DM DataFrames
-merged_df = ae_df.join(dd_df, on="USUBJID", how="left")
-merged_df = merged_df.join(dm_df, on="USUBJID", how="left")
+# Merge DataFrames
+merged_df = pd.merge(ae_df, dd_df, on='USUBJID', how='inner')
+merged_df = pd.merge(merged_df, dm_df, on='USUBJID', how='left')
 
-# Calculate Maximum Disposition Date (DDDAT)
-merged_df = merged_df.withColumn("MaxDispositionDate", col("DDDAT"))
+# Calculate Duration between AE End Date and Death Date
+merged_df['Duration (days)'] = (merged_df['DDDAT'] - merged_df['AEENDDATE']).dt.days
 
-# Add Message Column: Check if death occurred after AE end date
-merged_df = merged_df.withColumn(
-    "Message",
-    when((col("DDDAT").isNotNull()) & (col("DDDAT") > col("AEENDDATE")), "Yes").otherwise("No")
-)
+# Select and rename columns
+final_listing = merged_df[[
+    'USUBJID', 'AETERM', 'AEDECODE', 'AEENDDATE', 'DDDAT', 'Duration (days)', 'RFICDT'
+]]
+final_listing.rename(columns={
+    'USUBJID': 'Subject ID'
+}, inplace=True)
 
-# Select and rename required columns
-final_listing = merged_df.select(
-    col("USUBJID"),
-    col("AETERM"),
-    col("AEDECODE"),
-    col("AESTARTDATE"),
-    col("AEENDDATE"),
-    col("AE_LOG").alias("AE Logline"),
-    col("MaxDispositionDate").alias("Maximum Disposition Date"),
-    col("RFICDT"),
-    col("Message")
-)
-
-# Show the final listing
-final_listing.show()
+# Display the final listing
+print(final_listing)
 ```
 
 ### Explanation:
 1. **Data Preparation**:
-   - Convert date columns to the appropriate `date` format using `to_date`.
-2. **Joining DataFrames**:
-   - Use `join` to merge AE, DD, and DM DataFrames on `USUBJID`.
-3. **Calculating `Message`**:
-   - Use `when` and `otherwise` to create a conditional column indicating if a death occurred after the AE end date.
+   - Convert all date columns to `datetime` format for accurate calculations.
+2. **Data Merging**:
+   - Inner join AE and DD domains to filter subjects who experienced an AE and later died.
+   - Left join with DM to include reference start dates.
+3. **Duration Calculation**:
+   - Calculate the difference between `DDDAT` (Death Date) and `AEENDDATE` (AE End Date) in days.
 4. **Final Listing**:
-   - Select and rename columns for better clarity.
+   - Select and rename columns for better readability.
 
 ### Output:
 The resulting DataFrame (`final_listing`) will look like this:
 
-| USUBJID  | AETERM     | AEDECODE   | AESTARTDATE | AEENDDATE   | AE Logline | Maximum Disposition Date | RFICDT     | Message |
-|----------|------------|------------|-------------|-------------|------------|---------------------------|------------|---------|
-| SUBJ001  | Headache   | HEADACHE   | 2024-01-01  | 2024-01-10  | Log1       | 2024-01-15                | 2023-12-25 | Yes     |
-| SUBJ002  | Nausea     | NAUSEA     | 2024-02-01  | 2024-02-10  | Log2       | 2024-02-12                | 2024-01-15 | Yes     |
-| SUBJ003  | Dizziness  | DIZZINESS  | 2024-03-01  | 2024-03-15  | Log3       | null                      | 2024-02-20 | No      |
+| Subject ID | AETERM    | AEDECODE   | AEENDDATE   | DDDAT      | Duration (days) | RFICDT     |
+|------------|-----------|------------|-------------|------------|-----------------|------------|
+| SUBJ001    | Headache  | HEADACHE   | 2024-01-10  | 2024-01-15 | 5               | 2023-12-25 |
+| SUBJ002    | Nausea    | NAUSEA     | 2024-02-10  | 2024-02-12 | 2               | 2024-01-15 |
+
+This listing provides critical insights into subjects who died after experiencing an AE and the duration between these events.
