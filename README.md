@@ -1,7 +1,7 @@
-# Lesson 4: Advanced Clinical Data Analysis Using PySpark
+# Lesson 4: Advanced Clinical Data Analysis Using Pandas
 
 ## Title:
-Performing Advanced Clinical Data Analysis with PySpark: Leveraging Partitioning, Joins, and UDFs for Insights into Adverse Events, Concomitant Medications, and Medical History
+Performing Advanced Clinical Data Analysis with Pandas: Combining Medical History, Medications, Demographics, and Adverse Events for Deriving Insights
 
 ## Objective:
 Create a complex listing combining data from the following clinical domains:
@@ -12,7 +12,7 @@ Create a complex listing combining data from the following clinical domains:
 
 The listing will:
 1. Analyze adverse events (AE) in the context of a subject’s medical history (MH) and medications (CM).
-2. Use advanced PySpark operations like `window functions` (via partitioning) and `user-defined functions` (UDFs) for meaningful derivations.
+2. Use advanced Pandas operations like `groupby`, custom functions, and conditional derivations for insights.
 3. Include derived metrics such as the count of overlapping medications and a flag indicating severe AEs based on custom criteria.
 
 ### Key Columns:
@@ -24,105 +24,98 @@ The listing will:
 - **Overlap Count**: Number of overlapping medications during the AE period.
 
 ```python
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, to_date, count, when, udf
-from pyspark.sql.window import Window
-from pyspark.sql.types import StringType
-
-# Initialize Spark session
-spark = SparkSession.builder.appName("Advanced Clinical Data Analysis").getOrCreate()
+import pandas as pd
 
 # Sample DataFrames for MH, CM, DM, and AE
-mh_data = [
-    ("SUBJ001", "Hypertension", "2023-12-15"),
-    ("SUBJ002", "Arthritis", "2024-02-01"),
-    ("SUBJ003", "Heart Disease", "2024-03-10")
-]
-cm_data = [
-    ("SUBJ001", "Paracetamol", "2024-01-01", "2024-01-10"),
-    ("SUBJ002", "Ibuprofen", "2024-02-10", "2024-02-15"),
-    ("SUBJ003", "Aspirin", "2024-03-15", "2024-03-20")
-]
-ae_data = [
-    ("SUBJ001", "Headache", "Moderate", "2024-01-05", "2024-01-07"),
-    ("SUBJ002", "Nausea", "Severe", "2024-02-12", "2024-02-14"),
-    ("SUBJ003", "Dizziness", "Mild", "2024-03-16", "2024-03-17")
-]
-dm_data = [
-    ("SUBJ001", "2023-12-25"),
-    ("SUBJ002", "2024-01-15"),
-    ("SUBJ003", "2024-02-20")
-]
+mh_data = {
+    "USUBJID": ["SUBJ001", "SUBJ002", "SUBJ003"],
+    "MHDECOD": ["Hypertension", "Arthritis", "Heart Disease"],
+    "MHSTDTC": ["2023-12-15", "2024-02-01", "2024-03-10"]
+}
 
-# Define schema and create DataFrames
-mh_df = spark.createDataFrame(mh_data, ["USUBJID", "MHDECOD", "MHSTDTC"])
-cm_df = spark.createDataFrame(cm_data, ["USUBJID", "CMTRT", "CMSTDTC", "CMENDTC"])
-ae_df = spark.createDataFrame(ae_data, ["USUBJID", "AETERM", "AESEV", "AESTARTDATE", "AEENDDATE"])
-dm_df = spark.createDataFrame(dm_data, ["USUBJID", "RFICDT"])
+cm_data = {
+    "USUBJID": ["SUBJ001", "SUBJ002", "SUBJ003"],
+    "CMTRT": ["Paracetamol", "Ibuprofen", "Aspirin"],
+    "CMSTDTC": ["2024-01-01", "2024-02-10", "2024-03-15"],
+    "CMENDTC": ["2024-01-10", "2024-02-15", "2024-03-20"]
+}
 
-# Convert date columns to date type
-def convert_dates(df, cols):
-    for col_name in cols:
-        df = df.withColumn(col_name, to_date(col(col_name)))
-    return df
+ae_data = {
+    "USUBJID": ["SUBJ001", "SUBJ002", "SUBJ003"],
+    "AETERM": ["Headache", "Nausea", "Dizziness"],
+    "AESEV": ["Moderate", "Severe", "Mild"],
+    "AESTARTDATE": ["2024-01-05", "2024-02-12", "2024-03-16"],
+    "AEENDDATE": ["2024-01-07", "2024-02-14", "2024-03-17"]
+}
 
-mh_df = convert_dates(mh_df, ["MHSTDTC"])
-cm_df = convert_dates(cm_df, ["CMSTDTC", "CMENDTC"])
-ae_df = convert_dates(ae_df, ["AESTARTDATE", "AEENDDATE"])
-dm_df = convert_dates(dm_df, ["RFICDT"])
+dm_data = {
+    "USUBJID": ["SUBJ001", "SUBJ002", "SUBJ003"],
+    "RFICDT": ["2023-12-25", "2024-01-15", "2024-02-20"]
+}
 
-# Join DataFrames
-merged_df = ae_df.join(cm_df, on="USUBJID", how="inner")
-merged_df = merged_df.join(mh_df, on="USUBJID", how="left")
-merged_df = merged_df.join(dm_df, on="USUBJID", how="left")
+# Convert to DataFrames
+mh_df = pd.DataFrame(mh_data)
+cm_df = pd.DataFrame(cm_data)
+ae_df = pd.DataFrame(ae_data)
+dm_df = pd.DataFrame(dm_data)
 
-# Define a UDF to flag severe AEs
+# Convert date columns to datetime format
+for df, cols in [(mh_df, ["MHSTDTC"]), (cm_df, ["CMSTDTC", "CMENDTC"]), (ae_df, ["AESTARTDATE", "AEENDDATE"]), (dm_df, ["RFICDT"])]:
+    for col in cols:
+        df[col] = pd.to_datetime(df[col])
+
+# Merge DataFrames
+merged_df = ae_df.merge(cm_df, on="USUBJID", how="inner")
+merged_df = merged_df.merge(mh_df, on="USUBJID", how="left")
+merged_df = merged_df.merge(dm_df, on="USUBJID", how="left")
+
+# Define a function to flag severe AEs
 def severity_flag(severity):
     return "Yes" if severity == "Severe" else "No"
 
-severity_flag_udf = udf(severity_flag, StringType())
-merged_df = merged_df.withColumn("AE Severity Flag", severity_flag_udf(col("AESEV")))
+merged_df["AE Severity Flag"] = merged_df["AESEV"].apply(severity_flag)
 
-# Calculate Overlap Count using a Window function
-window_spec = Window.partitionBy("USUBJID").orderBy("AESTARTDATE")
-merged_df = merged_df.withColumn(
-    "Overlap Count",
-    count(when((col("CMSTDTC") <= col("AEENDDATE")) & (col("CMENDTC") >= col("AESTARTDATE")), 1)).over(window_spec)
-)
+# Calculate Overlap Count
+def calculate_overlap(row):
+    overlap = (
+        (row["CMSTDTC"] <= row["AEENDDATE"]) &
+        (row["CMENDTC"] >= row["AESTARTDATE"])
+    )
+    return overlap.sum() if isinstance(overlap, pd.Series) else int(overlap)
+
+merged_df["Overlap Count"] = merged_df.apply(calculate_overlap, axis=1)
 
 # Select and rename columns for final listing
-final_listing = merged_df.select(
-    col("USUBJID").alias("Subject ID"),
-    col("MHDECOD").alias("Medical History Term"),
-    col("CMTRT").alias("Concomitant Medication"),
-    col("AETERM").alias("Adverse Event Term"),
-    col("AE Severity Flag"),
-    col("Overlap Count"),
-    col("AESTARTDATE"),
-    col("AEENDDATE")
-)
+final_listing = merged_df[[
+    "USUBJID", "MHDECOD", "CMTRT", "AETERM", "AE Severity Flag", "Overlap Count", "AESTARTDATE", "AEENDDATE"
+]].rename(columns={
+    "USUBJID": "Subject ID",
+    "MHDECOD": "Medical History Term",
+    "CMTRT": "Concomitant Medication",
+    "AETERM": "Adverse Event Term",
+    "AESTARTDATE": "AE Start Date",
+    "AEENDDATE": "AE End Date"
+})
 
-# Show the final listing
-final_listing.show()
+# Display the final listing
+print(final_listing)
 ```
 
 ### Explanation:
 1. **Data Preparation**:
-   - Convert date columns to the correct format for operations.
-2. **Advanced Joins**:
-   - Combine data from multiple domains using `join`.
-3. **User-Defined Functions**:
-   - Define a UDF to flag severe AEs based on the severity column.
-4. **Window Functions**:
-   - Calculate the count of overlapping medications during AE periods using partitioning.
-5. **Final Output**:
+   - Convert date columns to `datetime` format for accurate comparisons.
+2. **Merging DataFrames**:
+   - Combine data from multiple domains using `merge`.
+3. **Custom Functions**:
+   - Use `apply` to flag severe AEs and calculate overlaps between medications and AE periods.
+4. **Final Output**:
    - Select and rename columns for better clarity.
 
 ### Sample Output:
-| Subject ID | Medical History Term | Concomitant Medication | Adverse Event Term | AE Severity Flag | Overlap Count | AESTARTDATE | AEENDDATE   |
-|------------|-----------------------|-------------------------|--------------------|------------------|---------------|-------------|-------------|
-| SUBJ001    | Hypertension         | Paracetamol            | Headache           | No               | 1             | 2024-01-05  | 2024-01-07  |
-| SUBJ002    | Arthritis            | Ibuprofen              | Nausea             | Yes              | 1             | 2024-02-12  | 2024-02-14  |
-| SUBJ003    | Heart Disease        | Aspirin                | Dizziness          | No               | 1             | 2024-03-16  | 2024-03-17  |
+| Subject ID | Medical History Term | Concomitant Medication | Adverse Event Term | AE Severity Flag | Overlap Count | AE Start Date | AE End Date   |
+|------------|-----------------------|-------------------------|--------------------|------------------|---------------|---------------|---------------|
+| SUBJ001    | Hypertension         | Paracetamol            | Headache           | No               | 1             | 2024-01-05    | 2024-01-07    |
+| SUBJ002    | Arthritis            | Ibuprofen              | Nausea             | Yes              | 1             | 2024-02-12    | 2024-02-14    |
+| SUBJ003    | Heart Disease        | Aspirin                | Dizziness          | No               | 1             | 2024-03-16    | 2024-03-17    |
 
-This listing combines advanced PySpark techniques to derive meaningful insights from clinical data.
+This listing provides advanced insights into the relationship between adverse events, medical history, and concomitant medications for each subject.
